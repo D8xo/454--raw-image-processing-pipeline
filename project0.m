@@ -1,94 +1,82 @@
-// Project 0 - RAW Image Processing Pipeline
+raw = imread('Project0/data/banana_slug.tiff');
 
-//              1. Initials
-raw = imread('C:\Users\320316331\Downloads\Project0-2\Project0\data\banana_slug.tiff');
-
-[Ysize, Xsize] = size(raw)
-class(raw)
+[Ysize, Xsize] = size(raw)   
+class(raw)                    
 
 raw = double(raw);
 
-//              2. Linearization
-black = 2047;
-saturation = 15000;
+BLACK_LEVEL = 2047;
+SATURATION  = 15000;
 
-lin = (raw - black) / (saturation - black);
-lin = max(0, min(1, lin));
+linearized = (raw - BLACK_LEVEL) / (SATURATION - BLACK_LEVEL);
+linearized = max(0, min(1, linearized));
 
-//              3. Identify Bayer Pattern
-pattern = 'rggb';
+R  = linearized(1:2:end, 1:2:end);
+G1 = linearized(1:2:end, 2:2:end);
+G2 = linearized(2:2:end, 1:2:end);
+B  = linearized(2:2:end, 2:2:end);
 
-//             4. White Balance
-R = lin(1:2:end, 1:2:end);
-G1 = lin(1:2:end, 2:2:end);
-G2 = lin(2:2:end, 1:2:end);
-B = lin(2:2:end, 2:2:end);
+G_ref = (G1 + G2) / 2;
 
-G = (G1 + G2) / 2;
+wb_gray = linearized;
+wb_gray(1:2:end, 1:2:end) = R * (mean(G_ref(:)) / mean(R(:)));
+wb_gray(2:2:end, 2:2:end) = B * (mean(G_ref(:)) / mean(B(:)));
 
-wb_gray = lin;
-wb_gray(1:2:end, 1:2:end) = R * (mean(G(:)) / mean(R(:)));
-wb_gray(2:2:end, 2:2:end) = B * (mean(G(:)) / mean(B(:)));
+wb_white = linearized;
+wb_white(1:2:end, 1:2:end) = R * (max(G_ref(:)) / max(R(:)));
+wb_white(2:2:end, 2:2:end) = B * (max(G_ref(:)) / max(B(:)));
 
-wb_white = lin;
-wb_white(1:2:end, 1:2:end) = R * (max(G(:)) / max(R(:)));
-wb_white(2:2:end, 2:2:end) = B * (max(G(:)) / max(B(:)));
+mosaic = wb_gray;
 
-//             5. Demosaicing
-[rows, cols] = size(wb_gray);
-[Xq, Yq] = meshgrid(1:cols, 1:rows);
+[rows, cols] = size(mosaic);
+[Xfull, Yfull] = meshgrid(1:cols, 1:rows);
 
 [Xr, Yr] = meshgrid(1:2:cols, 1:2:rows);
-Rvals = wb_gray(1:2:end, 1:2:end);
-R_full = interp2(Xr, Yr, Rvals, Xq, Yq, 'linear', 0);
+R_full = interp2(Xr, Yr, mosaic(1:2:end, 1:2:end), Xfull, Yfull, 'linear', 0);
 
-G_mosaic = zeros(rows, cols);
-G_mosaic(1:2:end, 2:2:end) = wb_gray(1:2:end, 2:2:end);
-G_mosaic(2:2:end, 1:2:end) = wb_gray(2:2:end, 1:2:end);
+G_sparse = zeros(rows, cols);
+G_sparse(1:2:end, 2:2:end) = mosaic(1:2:end, 2:2:end);
+G_sparse(2:2:end, 1:2:end) = mosaic(2:2:end, 1:2:end);
 
-known_g = G_mosaic > 0;
-G_full = griddata(Xq(known_g), Yq(known_g), G_mosaic(known_g), Xq, Yq, 'linear');
-G_full = max(0, min(1, inpaintn(G_full)));
+[Xg1, Yg1] = meshgrid(2:2:cols, 1:2:rows);
+[Xg2, Yg2] = meshgrid(1:2:cols, 2:2:rows);
+G1_full = interp2(Xg1, Yg1, mosaic(1:2:end, 2:2:end), Xfull, Yfull, 'linear', 0);
+G2_full = interp2(Xg2, Yg2, mosaic(2:2:end, 1:2:end), Xfull, Yfull, 'linear', 0);
+G_full = (G1_full + G2_full) / 2;
 
 [Xb, Yb] = meshgrid(2:2:cols, 2:2:rows);
-Bvals = wb_gray(2:2:end, 2:2:end);
-B_full = interp2(Xb, Yb, Bvals, Xq, Yq, 'linear', 0);
+B_full = interp2(Xb, Yb, mosaic(2:2:end, 2:2:end), Xfull, Yfull, 'linear', 0);
 
-rgb = cat(3, R_full, G_full, B_full);
-rgb = max(0, min(1, rgb));
+rgb = max(0, min(1, cat(3, R_full, G_full, B_full)));
 
-//            6. Gamma Correction
-gray = 0.2126 * rgb(:,:,1) + 0.7152 * rgb(:,:,2) + 0.0722 * rgb(:,:,3);
-scale = .25 / mean(gray(:));
-rgb_bright = rgb * scale;
-rgb_bright = max(0, min(1, rgb_bright));
+
+luminance = 0.2126 * rgb(:,:,1) + 0.7152 * rgb(:,:,2) + 0.0722 * rgb(:,:,3);
+rgb_bright = min(1, rgb * (0.25 / mean(luminance(:))));
 
 rgb_gamma = zeros(size(rgb_bright));
-
-mask = rgb_bright <= 0.0031308;
-rgb_gamma(mask) = 12.92 * rgb_bright(mask);
-rgb_gamma(~mask) = 1.055 * (rgb_bright(~mask) .^ (1/2.4)) - 0.055;
+dark = rgb_bright <= 0.0031308;
+rgb_gamma(dark)  = 12.92 * rgb_bright(dark);
+rgb_gamma(~dark) = 1.055 * rgb_bright(~dark) .^ (1/2.4) - 0.055;
 
 figure;
 imshow(rgb_gamma);
-title('Final Image')
+title('Final Processed Image');
 
-//           7. Comp
 imwrite(rgb_gamma, 'banana_slug.png');
-
 imwrite(rgb_gamma, 'banana_slug_95.jpg', 'Quality', 95);
 
 png_info = dir('banana_slug.png');
 jpg_info = dir('banana_slug_95.jpg');
 
-fprintf('PNG file size: %.2f MB\n', png_info.bytes / 1e6);
-fprintf('JPEG file size: %.2f MB\n', jpg_info.bytes / 1e6);
-fprintf('Compression ratio: %.2f\n', png_info.bytes / jpg_info.bytes);
+fprintf('\n--- Compression Results ---\n');
+fprintf('PNG size:          %.2f MB\n', png_info.bytes / 1e6);
+fprintf('JPEG (q=95) size:  %.2f MB\n', jpg_info.bytes / 1e6);
+fprintf('Compression ratio: %.2fx\n',   png_info.bytes / jpg_info.bytes);
 
+fprintf('\nQuality sweep:\n');
 for q = [75, 50, 25, 10]
     fname = sprintf('banana_slug_%d.jpg', q);
     imwrite(rgb_gamma, fname, 'Quality', q);
     info = dir(fname);
-    fprintf('Quality %d: %.2f MB\n', q, info.bytes / 1e6);
+    fprintf('  q=%-3d  %.2f MB\n', q, info.bytes / 1e6);
 end
-
