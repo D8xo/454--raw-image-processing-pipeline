@@ -1,7 +1,6 @@
 clear; clc; close all;
 
 
-%raw = imread('/Users/atadural/Downloads/Project0/data/banana_slug.tiff');
 raw = imread('banana_slug.tiff');
 
 [height, width] = size(raw);
